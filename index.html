@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e1117">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<title>Sign Language Lessons</title>
+<style>
+  :root { --bg:#0e1117; --fg:#fafafa; --muted:#8b93a1; --accent:#ff4b4b; --ok:#3ddc84; --card:#161b26; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif; }
+  .screen { position:fixed; inset:0; display:flex; flex-direction:column; }
+  .hidden, [hidden] { display:none !important; }
+  button { padding:14px 24px; border:0; border-radius:10px; font-size:16px; font-weight:600; color:#fff; background:#2a2a3a; }
+  .primary { background:var(--accent); }
+  /* auth */
+  #auth { align-items:center; justify-content:center; padding:24px; gap:10px; z-index:30; background:var(--bg); }
+  #auth h1 { font-size:22px; margin:0 0 12px; text-align:center; }
+  .tabs { display:flex; gap:8px; margin-bottom:8px; }
+  .tab { padding:10px 22px; color:#aaa; } .tab.active { background:var(--accent); color:#fff; }
+  #auth input { width:100%; max-width:320px; padding:13px; border-radius:8px; border:1px solid #2a2a3a; background:var(--card); color:var(--fg); font-size:16px; }
+  #auth label { width:100%; max-width:320px; font-size:13px; color:var(--muted); margin-top:4px; }
+  #authBtn { width:100%; max-width:320px; margin-top:10px; background:var(--accent); }
+  #authErr { color:var(--accent); font-size:13px; min-height:18px; text-align:center; max-width:320px; }
+  /* menu */
+  #menu { padding:calc(env(safe-area-inset-top,0px) + 20px) 16px calc(env(safe-area-inset-bottom,0px) + 16px); overflow-y:auto; }
+  #menu header { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+  #menu h1 { font-size:24px; margin:0; }
+  #count { color:var(--muted); font-size:14px; margin-bottom:16px; }
+  #logoutBtn { padding:8px 14px; font-size:13px; }
+  .card { width:100%; display:flex; justify-content:space-between; align-items:center; text-align:left;
+    background:var(--card); border:1px solid #2a2a3a; margin-bottom:10px; padding:18px; }
+  .card.done span:last-child { color:var(--ok); }
+  /* lesson */
+  video, canvas { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+  #hud { position:absolute; left:0; right:0; top:0; padding:calc(env(safe-area-inset-top,0px) + 12px) 16px 14px;
+    background:linear-gradient(#000a,#0000); }
+  #target { font-size:24px; font-weight:700; } #hint { font-size:14px; color:#ddd; margin-top:2px; }
+  #track { height:8px; background:#fff3; border-radius:4px; margin-top:10px; overflow:hidden; }
+  #fill { height:100%; width:0; background:var(--ok); }
+  #seen { font-size:13px; color:#ccc; margin-top:6px; min-height:16px; }
+  #bar { position:absolute; left:0; right:0; bottom:0; padding:12px 16px calc(env(safe-area-inset-bottom,0px) + 16px); display:flex; gap:12px; justify-content:center; }
+  #win { position:absolute; inset:0; background:#0e1117ee; align-items:center; justify-content:center; gap:12px; font-size:26px; font-weight:700; display:flex; flex-direction:column; }
+  #win .ok { color:var(--ok); font-size:48px; }
+  #loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:var(--bg); color:var(--muted); text-align:center; padding:32px; }
+</style>
+</head>
+<body>
+
+<div id="auth" class="screen">
+  <h1>🤟 Sign Language Duolingo</h1>
+  <div class="tabs"><button class="tab active" id="tabLogin">Log In</button><button class="tab" id="tabSignup">Sign Up</button></div>
+  <label for="email">Email</label><input id="email" type="email" autocomplete="email">
+  <label for="pw">Password</label><input id="pw" type="password" autocomplete="current-password">
+  <label for="pw2" id="pw2Label" hidden>Confirm Password</label><input id="pw2" type="password" hidden autocomplete="new-password">
+  <button id="authBtn">Log In</button>
+  <div id="authErr"></div>
+</div>
+
+<div id="menu" class="screen hidden">
+  <header><h1>Lessons</h1><button id="logoutBtn">Log out</button></header>
+  <div id="count"></div>
+  <div id="list"></div>
+</div>
+
+<div id="lesson" class="screen hidden">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
+  <div id="hud">
+    <div id="target"></div><div id="hint"></div>
+    <div id="track"><div id="fill"></div></div>
+    <div id="seen"></div>
+  </div>
+  <div id="bar"><button id="backBtn">Back</button><button id="flipBtn">Flip camera</button></div>
+  <div id="win" hidden><div class="ok">✓</div><div>Nice work!</div>
+    <button class="primary" id="nextBtn">Next lesson</button><button id="menuBtn">Back to lessons</button></div>
+  <div id="loading">Loading...</div>
+</div>
+
+<script type="module">
+import { GestureRecognizer, FilesetResolver }
+  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm";
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const $ = id => document.getElementById(id);
+
+// ---------- Lessons (the 7 gestures the stock model recognizes) ----------
+const LESSONS = [
+  { id:"open_palm", name:"Open Palm",  cat:"Open_Palm",  hint:"Flat hand, fingers spread, palm toward the camera." },
+  { id:"fist",      name:"Closed Fist",cat:"Closed_Fist",hint:"Curl all fingers into a fist." },
+  { id:"thumb_up",  name:"Thumbs Up",  cat:"Thumb_Up",   hint:"Fist with your thumb pointing up." },
+  { id:"thumb_down",name:"Thumbs Down",cat:"Thumb_Down", hint:"Fist with your thumb pointing down." },
+  { id:"point",     name:"Point Up",   cat:"Pointing_Up",hint:"Index finger straight up, other fingers curled." },
+  { id:"victory",   name:"Victory",    cat:"Victory",    hint:"Index and middle fingers up in a V." },
+  { id:"ily",       name:"I Love You", cat:"ILoveYou",   hint:"Thumb, index finger and pinky out. This is the ASL sign for I love you." }
+];
+const CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],
+  [0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
+const HOLD_MS = 1000, MIN_SCORE = 0.6;
+
+let userId = null, current = null, holdStart = null, done = false;
+let recognizer = null, stream = null, running = false, facing = "user", lastVideoTime = -1;
+const video = $("video"), canvas = $("canvas"), ctx = canvas.getContext("2d");
+
+// ---------- Progress (saved on this device, per account) ----------
+const getProg = () => { try { return JSON.parse(localStorage.getItem("progress:" + userId) || "[]"); } catch { return []; } };
+const setProg = a => { try { localStorage.setItem("progress:" + userId, JSON.stringify(a)); } catch {} };
+
+function show(name) {
+  for (const s of ["auth", "menu", "lesson"]) $(s).classList.toggle("hidden", s !== name);
+}
+function renderMenu() {
+  const prog = getProg();
+  $("list").innerHTML = "";
+  LESSONS.forEach((l, i) => {
+    const b = document.createElement("button");
+    b.className = "card" + (prog.includes(l.id) ? " done" : "");
+    b.innerHTML = `<span>Lesson ${i + 1}: ${l.name}</span><span>${prog.includes(l.id) ? "✓" : "›"}</span>`;
+    b.onclick = () => openLesson(l);
+    $("list").appendChild(b);
+  });
+  $("count").textContent = `${prog.length} of ${LESSONS.length} complete`;
+}
+
+// ---------- Camera + model ----------
+async function loadModel() {
+  if (recognizer) return;
+  const fileset = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  const opts = d => ({ baseOptions:{ modelAssetPath:"models/gesture_recognizer.task", delegate:d }, runningMode:"VIDEO", numHands:2 });
+  try { recognizer = await GestureRecognizer.createFromOptions(fileset, opts("GPU")); }
+  catch { recognizer = await GestureRecognizer.createFromOptions(fileset, opts("CPU")); }
+}
+async function startCamera() {
+  stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:facing, width:{ideal:640}, height:{ideal:480} }, audio:false });
+  video.srcObject = stream;
+  video.style.transform = canvas.style.transform = facing === "user" ? "scaleX(-1)" : "none";
+  await video.play();
+}
+function stopCamera() {
+  running = false;
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null; video.srcObject = null;
+}
+
+// ---------- Lesson flow ----------
+async function openLesson(l) {
+  current = l; done = false; holdStart = null; lastVideoTime = -1;
+  show("lesson");
+  $("win").hidden = true; $("loading").hidden = false; $("loading").textContent = "Loading...";
+  setTarget();
+  try {
+    await loadModel(); await startCamera();
+    $("loading").hidden = true; running = true; loop();
+  } catch (e) {
+    $("loading").textContent = "Couldn't start the camera: " + e.message;
+  }
+}
+function setTarget() {
+  $("target").textContent = "Show: " + current.name;
+  $("hint").textContent = current.hint;
+  $("fill").style.width = "0"; $("seen").textContent = "";
+}
+function closeLesson() { stopCamera(); show("menu"); renderMenu(); }
+
+function draw(result) {
+  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  for (const lms of result.landmarks) {
+    ctx.strokeStyle = "#00ff00"; ctx.lineWidth = 2;
+    for (const [a, b] of CONNECTIONS) { ctx.beginPath(); ctx.moveTo(lms[a].x*w, lms[a].y*h); ctx.lineTo(lms[b].x*w, lms[b].y*h); ctx.stroke(); }
+    ctx.fillStyle = "#ff0000";
+    for (const p of lms) { ctx.beginPath(); ctx.arc(p.x*w, p.y*h, 4, 0, Math.PI*2); ctx.fill(); }
+  }
+}
+function check(result) {
+  if (done) return;
+  const seen = result.gestures.map(g => g[0]).filter(g => g && g.categoryName !== "None");
+  $("seen").textContent = seen.length ? "Seeing: " + seen.map(g => g.categoryName.replace(/_/g, " ")).join(", ") : "";
+  const hit = seen.some(g => g.categoryName === current.cat && g.score > MIN_SCORE);
+  const now = performance.now();
+  if (!hit) { holdStart = null; $("fill").style.width = "0"; return; }
+  if (holdStart === null) holdStart = now;
+  const p = Math.min(1, (now - holdStart) / HOLD_MS);
+  $("fill").style.width = (p * 100) + "%";
+  if (p >= 1) {
+    done = true;
+    const prog = getProg(); if (!prog.includes(current.id)) { prog.push(current.id); setProg(prog); }
+    const last = LESSONS.indexOf(current) === LESSONS.length - 1;
+    $("nextBtn").hidden = last; $("win").hidden = false;
+  }
+}
+function loop() {
+  if (!running) return;
+  if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+    lastVideoTime = video.currentTime;
+    const result = recognizer.recognizeForVideo(video, performance.now());
+    draw(result); check(result);
+  }
+  requestAnimationFrame(loop);
+}
+
+$("backBtn").onclick = closeLesson;
+$("menuBtn").onclick = closeLesson;
+$("nextBtn").onclick = () => {
+  current = LESSONS[LESSONS.indexOf(current) + 1]; done = false; holdStart = null;
+  $("win").hidden = true; setTarget();
+};
+$("flipBtn").onclick = async () => {
+  running = false; stream.getTracks().forEach(t => t.stop());
+  facing = facing === "user" ? "environment" : "user";
+  await startCamera(); running = true; loop();
+};
+
+// ---------- Accounts ----------
+let mode = "login";
+function setMode(m) {
+  mode = m;
+  $("tabLogin").classList.toggle("active", m === "login"); $("tabSignup").classList.toggle("active", m === "signup");
+  $("pw2").hidden = $("pw2Label").hidden = m !== "signup";
+  $("authBtn").textContent = m === "login" ? "Log In" : "Sign Up"; $("authErr").textContent = "";
+}
+$("tabLogin").onclick = () => setMode("login");
+$("tabSignup").onclick = () => setMode("signup");
+$("authBtn").onclick = async () => {
+  const email = $("email").value.trim(), pw = $("pw").value, err = t => $("authErr").textContent = t;
+  if (!email || !pw) return err("Email and password are required.");
+  if (mode === "signup") {
+    if (pw !== $("pw2").value) return err("Passwords do not match.");
+    if (pw.length < 6) return err("Password must be at least 6 characters.");
+    const { data, error } = await supabase.auth.signUp({ email, password: pw });
+    if (error) return err(error.message);
+    if (!data.session) return err("Account created. Check your email to confirm, then log in.");
+  } else {
+    const { error } = await supabase.auth.signInWithPassword({ email, password: pw });
+    if (error) return err(error.message.includes("Invalid") ? "Incorrect email or password." : error.message);
+  }
+};
+$("logoutBtn").onclick = () => supabase.auth.signOut();
+
+function onSession(session) {
+  const uid = session ? session.user.id : null;
+  if (uid === userId) return;            // ignore token refreshes
+  userId = uid;
+  if (uid) { show("menu"); renderMenu(); }
+  else { stopCamera(); $("pw").value = $("pw2").value = ""; show("auth"); }
+}
+supabase.auth.onAuthStateChange((_e, session) => onSession(session));
+supabase.auth.getSession().then(({ data }) => onSession(data.session));
+
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
+</script>
+</body>
+</html>
